@@ -52,6 +52,12 @@
   }
   .wordmark { color: var(--paper); font-weight: 700; letter-spacing: .06em; line-height: 1.05; font-size: 1rem; margin-bottom: auto; }
   .wordmark span { display: block; font-weight: 400; }
+  .logo-img { display: block; height: auto; }
+  .panel-dark .logo-img { width: min(15rem, 70%); margin-bottom: auto; filter: brightness(0) invert(1); } /* turns the logo white on teal */
+  header.bar .logo-img { width: 11rem; }
+  .logo-fallback { display: none; }
+  .logo-missing .logo-img { display: none; }
+  .logo-missing .logo-fallback { display: block; }
   #signin .panel-dark h1 { font-weight: 500; font-size: clamp(2.8rem, 7vw, 5rem); line-height: 1.05; margin: 0 0 1rem; }
   #signin .panel-dark p { font-family: var(--serif); font-style: italic; max-width: 32ch; margin: 0; font-size: 1.15rem; line-height: 1.6; }
   #signin .panel-form { padding: clamp(2rem, 6vw, 5rem); display: flex; flex-direction: column; justify-content: center; max-width: 30rem; }
@@ -69,7 +75,7 @@
     display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
   }
   header.bar .name { margin-right: auto; color: var(--red); font-weight: 700; letter-spacing: .06em; line-height: 1.05; font-size: .95rem; }
-  header.bar .name span { display: block; font-weight: 400; }
+  header.bar .name .logo-fallback span { display: block; font-weight: 400; }
   header.bar .name em { display: block; font-style: normal; color: var(--teal); font-weight: 500; letter-spacing: 0; font-size: .85rem; margin-top: .2rem; }
   .role { font-size: .85rem; color: var(--muted); }
 
@@ -81,9 +87,7 @@
   #search:focus { border-color: var(--teal); }
 
   ol.reports { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--teal); }
-  ol.reports li { display: grid; grid-template-columns: 7.5rem 1fr auto; gap: 1.5rem; padding: 1.4rem 0; border-bottom: 1px solid var(--line); align-items: start; }
-  .date { color: var(--muted); font-size: .85rem; padding-top: .15rem; }
-  .date strong { display: block; color: var(--teal); font-size: 1.7rem; font-weight: 500; line-height: 1; }
+  ol.reports li { display: grid; grid-template-columns: 1fr auto; gap: 1.5rem; padding: 1.4rem 0; border-bottom: 1px solid var(--line); align-items: start; }
   .r-title { font-size: 1.2rem; font-weight: 600; color: var(--ink); background: none; border: none; padding: 0; text-align: left; cursor: pointer; }
   .r-title:hover { color: var(--red); text-decoration: underline; text-underline-offset: 4px; }
   .r-summary { font-family: var(--serif); margin: .35rem 0 0; max-width: 62ch; line-height: 1.65; }
@@ -125,7 +129,10 @@
 <!-- Sign in -->
 <section id="signin">
   <div class="panel-dark">
-    <div class="wordmark">SOLUTIONS<br>JOURNALISM<span>NETWORK</span></div>
+    <div class="logo" style="margin-bottom:auto">
+      <img class="logo-img" src="sjn-logo.png" alt="Solutions Journalism Network" onerror="this.parentNode.classList.add('logo-missing')">
+      <div class="wordmark logo-fallback">SOLUTIONS<br>JOURNALISM<span>NETWORK</span></div>
+    </div>
     <h1>Reports</h1>
     <p>Solutions Journalism Network reports, shared with our team and partners.</p>
   </div>
@@ -143,7 +150,13 @@
 <!-- Library -->
 <section id="library" hidden>
   <header class="bar">
-    <div class="name">SOLUTIONS<br>JOURNALISM<span>NETWORK</span><em>Reports</em></div>
+    <div class="name">
+      <div class="logo">
+        <img class="logo-img" src="sjn-logo.png" alt="Solutions Journalism Network" onerror="this.parentNode.classList.add('logo-missing')">
+        <div class="logo-fallback">SOLUTIONS<br>JOURNALISM<span>NETWORK</span></div>
+      </div>
+      <em>Reports</em>
+    </div>
     <span class="role" id="role-label"></span>
     <button class="btn" id="upload-open" hidden>Upload reports</button>
     <button class="btn ghost" id="signout">Sign out</button>
@@ -279,14 +292,12 @@ function render() {
   const list = $('list');
   list.innerHTML = items.map(r => {
     const d = new Date(r.uploaded);
-    const day = d.toLocaleDateString(undefined, { day: 'numeric' });
-    const monYr = d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    const when = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     return `<li>
-      <div class="date"><strong>${day}</strong>${esc(monYr)}</div>
       <div>
         <button class="r-title" data-open="${r.id}">${esc(r.title)}</button>
         ${r.summary ? `<p class="r-summary">${esc(r.summary)}</p>` : ''}
-        ${r.uploader ? `<p class="r-by">Uploaded by ${esc(r.uploader)}</p>` : ''}
+        <p class="r-by">Added ${esc(when)}${r.uploader ? ` by ${esc(r.uploader)}` : ''}</p>
       </div>
       <div class="r-actions">
         <button class="btn link" data-open="${r.id}">Open</button>
