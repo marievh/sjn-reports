@@ -206,7 +206,7 @@
 
 <script>
 // ===== Paste your Apps Script web app URL here (ends in /exec) =====
-const API_URL = 'https://script.google.com/macros/s/AKfycbzSbSDUP2f2ktCnrm4RmxUS2DZn74VIG4WdJri_V1HoIjJKIHh5H2Lel59sa7fgn6H0/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzFiOT7qfw0XekOtyFEopz9gLfnM9RDAfbsncrpNvh-Ibhsu4jciS_xK9a16WS16ay9/exec';
 
 const $ = (id) => document.getElementById(id);
 const state = { token: null, role: null, reports: [], current: null, pending: [] };
@@ -216,16 +216,36 @@ function store(key, val) {
 }
 function load(key) { try { return sessionStorage.getItem(key); } catch (e) { return null; } }
 
+async function callOnce(method, payload) {
+  const opts = { method, credentials: 'omit', redirect: 'follow', cache: 'no-store' };
+  let url = API_URL;
+  if (method === 'POST') {
+    // text/plain avoids a CORS preflight, which Apps Script doesn't support
+    opts.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
+    opts.body = payload;
+  } else {
+    url += '?payload=' + encodeURIComponent(payload);
+  }
+  const res = await fetch(url, opts);
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch (e) { return { ok: false, error: 'RETRY' }; } // Google sent a page instead of data
+}
+
 async function api(action, data = {}) {
-  // text/plain avoids a CORS preflight, which Apps Script doesn't support
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, token: state.token, ...data })
-  });
-  const out = await res.json();
+  const payload = JSON.stringify({ action, token: state.token, ...data });
+  let out;
+  // Google occasionally drops the body of a POST on its way to the script.
+  // Retry, then (for everything but uploads, which are too large) send it as a GET instead.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const useGet = attempt >= 2 && action !== 'upload';
+    out = await callOnce(useGet ? 'GET' : 'POST', payload);
+    if (out.error !== 'RETRY') break;
+    await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+  }
   if (!out.ok) {
     if (out.error === 'SESSION_EXPIRED') { signOut(true); throw new Error('Your session ended. Sign in again.'); }
+    if (out.error === 'RETRY') throw new Error("Couldn't reach the reports server. Please try again in a moment.");
     throw new Error(out.error || 'Something went wrong.');
   }
   return out;
