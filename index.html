@@ -206,7 +206,7 @@
 
 <script>
 // ===== Paste your Apps Script web app URL here (ends in /exec) =====
-const API_URL = 'https://script.google.com/macros/s/AKfycbzFiOT7qfw0XekOtyFEopz9gLfnM9RDAfbsncrpNvh-Ibhsu4jciS_xK9a16WS16ay9/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzSbSDUP2f2ktCnrm4RmxUS2DZn74VIG4WdJri_V1HoIjJKIHh5H2Lel59sa7fgn6H0/exec';
 
 const $ = (id) => document.getElementById(id);
 const state = { token: null, role: null, reports: [], current: null, pending: [] };
@@ -234,14 +234,15 @@ async function callOnce(method, payload) {
 
 async function api(action, data = {}) {
   const payload = JSON.stringify({ action, token: state.token, ...data });
+  // Small requests go as GET, which survives Google's redirects on the first try.
+  // Uploads are too large for that, so they use POST and retry if Google drops the body.
+  const method = action === 'upload' ? 'POST' : 'GET';
+  const tries = method === 'POST' ? 3 : 2;
   let out;
-  // Google occasionally drops the body of a POST on its way to the script.
-  // Retry, then (for everything but uploads, which are too large) send it as a GET instead.
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const useGet = attempt >= 2 && action !== 'upload';
-    out = await callOnce(useGet ? 'GET' : 'POST', payload);
+  for (let attempt = 0; attempt < tries; attempt++) {
+    out = await callOnce(method, payload);
     if (out.error !== 'RETRY') break;
-    await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    await new Promise(r => setTimeout(r, 300));
   }
   if (!out.ok) {
     if (out.error === 'SESSION_EXPIRED') { signOut(true); throw new Error('Your session ended. Sign in again.'); }
@@ -270,7 +271,7 @@ $('signin-form').addEventListener('submit', async (e) => {
     state.token = out.token; state.role = out.role;
     store('reports_token', out.token); store('reports_role', out.role);
     $('password').value = '';
-    showLibrary();
+    showLibrary(out.reports);
   } catch (err) {
     $('signin-error').textContent = err.message;
   } finally {
@@ -282,23 +283,26 @@ function signOut(expired) {
   if (!expired && state.token) api('logout').catch(() => {});
   state.token = null; state.role = null;
   store('reports_token', null); store('reports_role', null);
-  $('library').hidden = true; $('viewer').hidden = true; $('signin').hidden = false;
+  $('library').hidden = true; hideViewer(); $('signin').hidden = false;
+  if (location.hash.startsWith('#report=') && !expired) history.replaceState(null, '', location.pathname);
   if (expired) $('signin-error').textContent = 'Your session ended. Sign in again.';
   $('password').focus();
 }
 $('signout').addEventListener('click', () => signOut(false));
 
 /* ---------- Library ---------- */
-async function showLibrary() {
+async function showLibrary(preloaded) {
   $('signin').hidden = true; $('library').hidden = false;
   $('upload-open').hidden = state.role !== 'uploader';
   $('role-label').textContent = state.role === 'uploader' ? 'Can upload' : '';
+  if (preloaded) { state.reports = preloaded; render(); openFromAddress(); return; }
   $('list').innerHTML = '';
   $('empty').hidden = false; $('empty').textContent = 'Loading reports…';
   try {
     const out = await api('list');
     state.reports = out.reports;
     render();
+    openFromAddress();
   } catch (err) {
     $('empty').textContent = err.message;
   }
@@ -354,21 +358,64 @@ async function fetchReport(id) {
   return cache[id];
 }
 
-async function openReport(id) {
+// Added to every report before it's shown. Inside the frame, a link like "#section"
+// would otherwise load this site (and its sign-in page) instead of scrolling the report.
+// This makes "#" links scroll within the report, and sends other links to a new tab.
+const LINK_FIX = '<scr' + 'ipt>(function(){document.addEventListener("click",function(e){' +
+  'var a=e.target.closest&&e.target.closest("a[href]");if(!a)return;var h=a.getAttribute("href")||"";' +
+  'if(h.charAt(0)==="#"){e.preventDefault();var id=decodeURIComponent(h.slice(1));' +
+  'var el=id&&(document.getElementById(id)||document.getElementsByName(id)[0]);' +
+  'if(el)el.scrollIntoView({behavior:"smooth",block:"start"});else if(!id)window.scrollTo({top:0,behavior:"smooth"});}' +
+  'else if(!/^(javascript:|mailto:|tel:)/i.test(h)){a.target="_blank";a.rel="noopener";}},true);})();<\/script>';
+
+function prepareReport(html) {
+  return /<\/body>/i.test(html) ? html.replace(/<\/body>(?![\s\S]*<\/body>)/i, LINK_FIX + '</body>') : html + LINK_FIX;
+}
+
+// Swap in a fresh frame instead of changing the old one's content: changing it would add
+// hidden steps to the browser history, so Back would flip through those instead of leaving the report.
+function setFrame(html) {
+  const old = $('frame');
+  const f = old.cloneNode(false);
+  f.removeAttribute('srcdoc');
+  f.srcdoc = html;
+  old.replaceWith(f);
+}
+
+// Opening a report adds a step to the browser's history (#report=ID in the address bar),
+// so the browser's Back button returns to the list instead of leaving the site.
+async function openReport(id, fromHistory) {
+  if (!fromHistory) history.pushState({ report: id }, '', '#report=' + id);
   const r = state.reports.find(x => x.id === id);
   $('viewer-title').textContent = r ? r.title : 'Report';
-  $('frame').srcdoc = '<p style="font-family:Figtree,sans-serif;padding:2rem;color:#55686B">Loading report…</p>';
+  setFrame('<p style="font-family:Figtree,sans-serif;padding:2rem;color:#55686B">Loading report…</p>');
   $('viewer').hidden = false;
   state.current = id;
   $('viewer-back').focus();
   try {
     const out = await fetchReport(id);
-    if (state.current === id) $('frame').srcdoc = out.html;
+    if (state.current === id) setFrame(prepareReport(out.html));
   } catch (err) {
-    $('frame').srcdoc = `<p style="font-family:Figtree,sans-serif;padding:2rem;color:#D34435">${esc(err.message)}</p>`;
+    setFrame(`<p style="font-family:Figtree,sans-serif;padding:2rem;color:#D34435">${esc(err.message)}</p>`);
   }
 }
-function closeViewer() { $('viewer').hidden = true; $('frame').srcdoc = ''; state.current = null; }
+function hideViewer() { $('viewer').hidden = true; setFrame(''); state.current = null; }
+function closeViewer() {
+  if (history.state && history.state.report) history.back(); // the popstate handler hides the viewer
+  else { hideViewer(); history.replaceState(null, '', location.pathname); }
+}
+window.addEventListener('popstate', () => {
+  const id = history.state && history.state.report;
+  if (id && state.token) openReport(id, true);
+  else hideViewer();
+});
+// A link like reports.solutionsjournalism.org/#report=ID opens that report after sign-in
+function openFromAddress() {
+  const m = location.hash.match(/^#report=([\w-]+)$/);
+  if (!m || !state.token) return;
+  history.replaceState(null, '', location.pathname); // so Back goes to the list
+  openReport(m[1]);
+}
 $('viewer-back').addEventListener('click', closeViewer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('viewer').hidden) closeViewer(); });
 $('viewer-download').addEventListener('click', () => state.current && downloadReport(state.current));
