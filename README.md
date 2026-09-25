@@ -66,7 +66,7 @@ The website talks to Apps Script through the `/exec` URL set on the `API_URL` li
 - **Report scripts:** reports open in a sandboxed frame, so charts and interactive parts work but can't read the sign-in session.
 - **Links inside reports:** links to another section of the same report (like a table of contents) scroll within the report. All other links open in a new tab.
 - **Back button:** opening a report adds a step to browser history, so Back returns to the list rather than leaving the site.
-- **Google's redirects:** Google sometimes drops the contents of requests sent to Apps Script. To avoid that, sign-in and most requests are sent in the request address (encrypted over HTTPS), and uploads retry automatically. Sign-in also returns the report list in the same trip.
+- **Google's redirects:** Google sometimes drops the contents of requests sent to Apps Script. To avoid that, sign-in, the report list and deleting are sent in the request address (encrypted over HTTPS). Opening a report and uploading use POST with automatic retries, because some reports fail to come back over GET. Sign-in also returns the report list in the same trip.
 
 ## Troubleshooting
 

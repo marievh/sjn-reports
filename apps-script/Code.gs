@@ -134,21 +134,42 @@ function reportFile_(id) {
   throw new Error('Report not found.');
 }
 
+// Building the list means asking Drive about every file one question at a time, which gets
+// slow as reports pile up. So the finished list is kept in a cache for 10 minutes, and
+// cleared whenever someone uploads or deletes through the site.
+const LIST_CACHE_KEY = 'report_list';
+const LIST_CACHE_SECONDS = 10 * 60;
+
 function list_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(LIST_CACHE_KEY);
+  if (hit) return JSON.parse(hit);
+  const reports = buildList_();
+  const json = JSON.stringify(reports);
+  if (json.length < 95000) cache.put(LIST_CACHE_KEY, json, LIST_CACHE_SECONDS); // cache limit is 100 KB
+  return reports;
+}
+
+function clearListCache_() {
+  CacheService.getScriptCache().remove(LIST_CACHE_KEY);
+}
+
+function buildList_() {
   const files = folder_().getFiles();
   const reports = [];
   while (files.hasNext()) {
     const f = files.next();
-    if (f.isTrashed() || !isHtml_(f)) continue;
+    const name = f.getName();
+    if (!/\.html?$/i.test(name) && f.getMimeType() !== MimeType.HTML) continue;
+    if (f.isTrashed()) continue;
     const m = meta_(f);
     reports.push({
       id: f.getId(),
-      title: m.title || f.getName().replace(/\.html?$/i, ''),
+      title: m.title || name.replace(/\.html?$/i, ''),
       summary: m.summary || '',
       uploader: m.uploader || '',
       uploaded: m.uploaded || f.getDateCreated().toISOString(),
-      fileName: f.getName(),
-      size: f.getSize()
+      fileName: name
     });
   }
   reports.sort(function (a, b) { return a.uploaded < b.uploaded ? 1 : -1; });
@@ -184,13 +205,22 @@ function upload_(req) {
 
   const file = folder_().createFile(name, html, MimeType.HTML);
   file.setDescription(JSON.stringify(meta));
+  clearListCache_();
   return { ok: true, id: file.getId() };
 }
 
 function delete_(id) {
   // Moves to Drive trash, so a deleted report can be restored for 30 days.
   reportFile_(id).setTrashed(true);
+  clearListCache_();
   return { ok: true };
+}
+
+/* Run from the editor after dropping files straight into the Drive folder,
+   so they show up on the site right away instead of within 10 minutes. */
+function refreshList() {
+  clearListCache_();
+  Logger.log('Reports found: ' + list_().length);
 }
 
 /* Run once from the editor to grant Drive permission and check setup. */

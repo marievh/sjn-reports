@@ -206,7 +206,7 @@
 
 <script>
 // ===== Paste your Apps Script web app URL here (ends in /exec) =====
-const API_URL = 'https://script.google.com/macros/s/AKfycbwVSgJLJgNKNOMuD4LwwPTdJsdSSndJXSS2xo9bmlLdbbimAccWGcMuYkp7qqXWNQs0/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzSbSDUP2f2ktCnrm4RmxUS2DZn74VIG4WdJri_V1HoIjJKIHh5H2Lel59sa7fgn6H0/exec';
 
 const $ = (id) => document.getElementById(id);
 const state = { token: null, role: null, reports: [], current: null, pending: [] };
@@ -235,8 +235,8 @@ async function callOnce(method, payload) {
 async function api(action, data = {}) {
   const payload = JSON.stringify({ action, token: state.token, ...data });
   // Small requests go as GET, which survives Google's redirects on the first try.
-  // Uploads are too large for that, so they use POST and retry if Google drops the body.
-  const method = action === 'upload' ? 'POST' : 'GET';
+  // Uploads, and fetching a report's contents, use POST (some reports fail over GET) and retry if Google drops the body.
+  const method = (action === 'upload' || action === 'get') ? 'POST' : 'GET';
   const tries = method === 'POST' ? 3 : 2;
   let out;
   for (let attempt = 0; attempt < tries; attempt++) {
@@ -353,8 +353,19 @@ $('list').addEventListener('click', (e) => {
 
 /* ---------- Viewing ---------- */
 const cache = {};
+// Large reports arrive in pieces (see get_ in Code.gs): fetch the first piece,
+// then the rest, a few at a time, and join them back together.
 async function fetchReport(id) {
-  if (!cache[id]) cache[id] = await api('get', { id });
+  if (cache[id]) return cache[id];
+  const first = await api('get', { id, part: 0 });
+  const pieces = [first.html];
+  const total = first.parts || 1;
+  for (let start = 1; start < total; start += 4) {
+    const batch = [];
+    for (let i = start; i < Math.min(start + 4, total); i++) batch.push(api('get', { id, part: i }));
+    (await Promise.all(batch)).forEach(b => { pieces[b.part] = b.html; });
+  }
+  cache[id] = { fileName: first.fileName, html: pieces.join('') };
   return cache[id];
 }
 
